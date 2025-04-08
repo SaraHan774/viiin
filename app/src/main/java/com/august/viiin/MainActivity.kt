@@ -7,6 +7,7 @@ import android.os.Build
 import android.os.Bundle
 import android.os.VibrationEffect
 import android.os.Vibrator
+import android.util.Log
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.annotation.OptIn
@@ -17,12 +18,9 @@ import androidx.camera.core.ImageAnalysis
 import androidx.camera.core.Preview
 import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.camera.view.PreviewView
-import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -37,7 +35,6 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.text.font.FontWeight
@@ -48,6 +45,7 @@ import androidx.core.content.ContextCompat
 import androidx.lifecycle.LifecycleOwner
 import com.google.mlkit.vision.barcode.BarcodeScanning
 import com.google.mlkit.vision.barcode.common.Barcode
+import com.google.mlkit.vision.barcode.BarcodeScannerOptions
 import com.google.mlkit.vision.common.InputImage
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -81,8 +79,6 @@ class MainActivity : ComponentActivity() {
 fun BarcodeScannerScreen() {
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
-    val previewView = remember { PreviewView(context) }
-
     val uiState = remember { mutableStateOf(ScannerUIState.Start) }
     val scannedCode = remember { mutableStateOf("") }
     val productInfo = remember { mutableStateOf("") }
@@ -92,11 +88,7 @@ fun BarcodeScannerScreen() {
 
     when (uiState.value) {
         ScannerUIState.Start -> {
-            CameraPreviewScreen(
-                lifecycleOwner = lifecycleOwner,
-                context = context,
-            )
-            // StartScreen(onStartClick = { uiState.value = ScannerUIState.Scanning })
+            StartScreen(onStartClick = { uiState.value = ScannerUIState.Scanning })
         }
 
         ScannerUIState.Scanning -> {
@@ -108,7 +100,12 @@ fun BarcodeScannerScreen() {
                     scannedCode.value = code
 
                     // 진동 및 소리
-                    vibrator.vibrate(VibrationEffect.createOneShot(100, VibrationEffect.DEFAULT_AMPLITUDE))
+                    vibrator.vibrate(
+                        VibrationEffect.createOneShot(
+                            100,
+                            VibrationEffect.DEFAULT_AMPLITUDE
+                        )
+                    )
                     toneGen.startTone(ToneGenerator.TONE_PROP_BEEP)
 
                     // 와인 정보 가져오기
@@ -175,51 +172,7 @@ fun ScanningScreen(
 ) {
     // 1. PreviewView를 Composable 내에서 생성
     val previewView = remember { PreviewView(context) }
-
-    // 2. LaunchedEffect로 카메라 바인딩
-    LaunchedEffect(previewView) {
-        val cameraProvider = ProcessCameraProvider.getInstance(context).get()
-
-        val preview = Preview.Builder().build().also {
-            it.setSurfaceProvider(previewView.surfaceProvider)
-        }
-
-        val barcodeScanner = BarcodeScanning.getClient()
-        val analyzer = ImageAnalysis.Builder().build().also {
-            it.setAnalyzer(ContextCompat.getMainExecutor(context)) { imageProxy ->
-                val mediaImage = imageProxy.image
-                if (mediaImage != null) {
-                    val image = InputImage.fromMediaImage(
-                        mediaImage,
-                        imageProxy.imageInfo.rotationDegrees
-                    )
-                    barcodeScanner.process(image)
-                        .addOnSuccessListener { barcodes ->
-                            for (barcode in barcodes) {
-                                val code = barcode.rawValue ?: continue
-                                if (barcode.format == Barcode.FORMAT_EAN_13 && code != alreadyScannedCode) {
-                                    onCodeScanned(code)
-                                }
-                            }
-                        }
-                        .addOnFailureListener { }
-                        .addOnCompleteListener { imageProxy.close() }
-                } else {
-                    imageProxy.close()
-                }
-            }
-        }
-
-        val cameraSelector = CameraSelector.DEFAULT_BACK_CAMERA
-        cameraProvider.unbindAll()
-        cameraProvider.bindToLifecycle(
-            lifecycleOwner,
-            cameraSelector,
-            preview,
-            analyzer
-        )
-    }
-
+    Log.d("ScanningScreen", "PreviewView surfaceProvider : ${previewView.surfaceProvider}")
     // 3. UI
     Column(
         modifier = Modifier
@@ -241,35 +194,59 @@ fun ScanningScreen(
             Text("카메라 닫기")
         }
     }
-}
 
-@Composable
-fun CameraPreviewScreen(
-    lifecycleOwner: LifecycleOwner,
-    context: Context
-) {
-    val previewView = remember { PreviewView(context) }
-
-    LaunchedEffect(previewView) {
-        val cameraProvider = ProcessCameraProvider.getInstance(context).get()
-
-        val preview = Preview.Builder().build().apply {
-            surfaceProvider = previewView.surfaceProvider
+    // 2. LaunchedEffect로 카메라 바인딩
+    LaunchedEffect(Unit) {
+        val cameraProvider = withContext(Dispatchers.IO) {
+            ProcessCameraProvider.getInstance(context).get()
         }
 
+        val options = BarcodeScannerOptions.Builder()
+            .setBarcodeFormats(Barcode.FORMAT_EAN_13)
+            .build()
+        val barcodeScanner = BarcodeScanning.getClient(options)
+
+        val imageAnalysis = ImageAnalysis.Builder()
+            .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
+            .build()
+            .also { analysis ->
+                analysis.setAnalyzer(ContextCompat.getMainExecutor(context)) { imageProxy ->
+                    val mediaImage = imageProxy.image
+                    if (mediaImage != null) {
+                        val image = InputImage.fromMediaImage(
+                            mediaImage,
+                            imageProxy.imageInfo.rotationDegrees
+                        )
+                        barcodeScanner.process(image)
+                            .addOnSuccessListener { barcodes ->
+                                for (barcode in barcodes) {
+                                    val code = barcode.rawValue ?: continue
+                                    if (barcode.format == Barcode.FORMAT_EAN_13 &&
+                                        code != alreadyScannedCode) {
+                                        onCodeScanned(code)
+                                        break
+                                    }
+                                }
+                            }
+                            .addOnFailureListener {
+                                Log.e("BarcodeAnalyzer", "Barcode scanning failed", it)
+                            }
+                            .addOnCompleteListener {
+                                imageProxy.close()
+                            }
+                    } else {
+                        imageProxy.close()
+                    }
+                }
+            }
+
         val cameraSelector = CameraSelector.DEFAULT_BACK_CAMERA
-
         cameraProvider.unbindAll()
-        cameraProvider.bindToLifecycle(lifecycleOwner, cameraSelector, preview)
-    }
-
-    Box(
-        modifier = Modifier
-            .fillMaxWidth()
-            .aspectRatio(3f / 4f) // or height(400.dp)
-            .background(Color.Black)
-    ) {
-        AndroidView(factory = { previewView })
+        cameraProvider.bindToLifecycle(
+            lifecycleOwner,
+            cameraSelector,
+            imageAnalysis
+        )
     }
 }
 
