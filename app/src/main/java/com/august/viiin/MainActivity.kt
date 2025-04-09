@@ -43,23 +43,14 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.LifecycleOwner
+import com.google.mlkit.vision.barcode.BarcodeScannerOptions
 import com.google.mlkit.vision.barcode.BarcodeScanning
 import com.google.mlkit.vision.barcode.common.Barcode
-import com.google.mlkit.vision.barcode.BarcodeScannerOptions
 import com.google.mlkit.vision.common.InputImage
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
-import okhttp3.Call
-import okhttp3.Callback
-import okhttp3.OkHttpClient
-import okhttp3.Request
-import okhttp3.Response
-import okio.IOException
-import org.json.JSONObject
-import kotlin.coroutines.resume
 
 // MainActivity.kt
 class MainActivity : ComponentActivity() {
@@ -120,7 +111,7 @@ fun BarcodeScannerScreen() {
 
                     // 와인 정보 가져오기
                     CoroutineScope(Dispatchers.IO).launch {
-                        val result = fetchWineInfo(code)
+                        val result = WineInfoRepository().fetchWineInfo(code)
                         withContext(Dispatchers.Main) {
                             productInfo.value = result
                             uiState.value = ScannerUIState.Result
@@ -299,48 +290,6 @@ fun ResultScreen(
         TextButton(onClick = onBackToHome) {
             Text("처음으로")
         }
-    }
-}
-
-// 네트워크 요청 예시 (UPCItemDB API)
-suspend fun fetchWineInfo(code: String): String = suspendCancellableCoroutine { cont ->
-    val client = OkHttpClient()
-    val request = Request.Builder()
-        .url("https://api.upcitemdb.com/prod/trial/lookup?upc=$code")
-        .build()
-
-    client.newCall(request).enqueue(object : Callback {
-        override fun onFailure(call: Call, e: IOException) {
-            if (cont.isActive) cont.resume("API 요청 실패: ${e.message}")
-        }
-
-        override fun onResponse(call: Call, response: Response) {
-            try {
-                val body = response.body?.string() ?: run {
-                    cont.resume("No response")
-                    return
-                }
-
-                val json = JSONObject(body)
-                val items = json.getJSONArray("items")
-
-                if (items.length() > 0) {
-                    val item = items.getJSONObject(0)
-                    val title = item.getString("title")
-                    val brand = item.optString("brand", "")
-                    cont.resume("$title ($brand)")
-                } else {
-                    cont.resume("상품 정보를 찾을 수 없습니다.")
-                }
-
-            } catch (e: Exception) {
-                cont.resume("응답 처리 실패: ${e.message}")
-            }
-        }
-    })
-
-    cont.invokeOnCancellation {
-        client.dispatcher.cancelAll()
     }
 }
 
