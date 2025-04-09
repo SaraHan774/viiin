@@ -66,6 +66,16 @@ class MainActivity : ComponentActivity() {
     @RequiresApi(Build.VERSION_CODES.O)
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+
+        if (ContextCompat.checkSelfPermission(this, android.Manifest.permission.CAMERA)
+            != android.content.pm.PackageManager.PERMISSION_GRANTED) {
+            androidx.core.app.ActivityCompat.requestPermissions(
+                this,
+                arrayOf(android.Manifest.permission.CAMERA),
+                100
+            )
+        }
+
         setContent {
             MaterialTheme {
                 BarcodeScannerScreen()
@@ -197,56 +207,65 @@ fun ScanningScreen(
 
     // 2. LaunchedEffect로 카메라 바인딩
     LaunchedEffect(Unit) {
-        val cameraProvider = withContext(Dispatchers.IO) {
-            ProcessCameraProvider.getInstance(context).get()
-        }
+        previewView.post {
+            //Your camera is now set to start only after the PreviewView is fully laid out,
+            // preventing early binding errors and black screen issues. All camera logic also runs on the main thread, as required by CameraX.
+            CoroutineScope(Dispatchers.Main).launch {
+                val cameraProvider = ProcessCameraProvider.getInstance(context).get()
 
-        val options = BarcodeScannerOptions.Builder()
-            .setBarcodeFormats(Barcode.FORMAT_EAN_13)
-            .build()
-        val barcodeScanner = BarcodeScanning.getClient(options)
+                val options = BarcodeScannerOptions.Builder()
+                    .setBarcodeFormats(Barcode.FORMAT_EAN_13)
+                    .build()
+                val barcodeScanner = BarcodeScanning.getClient(options)
 
-        val imageAnalysis = ImageAnalysis.Builder()
-            .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
-            .build()
-            .also { analysis ->
-                analysis.setAnalyzer(ContextCompat.getMainExecutor(context)) { imageProxy ->
-                    val mediaImage = imageProxy.image
-                    if (mediaImage != null) {
-                        val image = InputImage.fromMediaImage(
-                            mediaImage,
-                            imageProxy.imageInfo.rotationDegrees
-                        )
-                        barcodeScanner.process(image)
-                            .addOnSuccessListener { barcodes ->
-                                for (barcode in barcodes) {
-                                    val code = barcode.rawValue ?: continue
-                                    if (barcode.format == Barcode.FORMAT_EAN_13 &&
-                                        code != alreadyScannedCode) {
-                                        onCodeScanned(code)
-                                        break
+                val imageAnalysis = ImageAnalysis.Builder()
+                    .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
+                    .build()
+                    .also { analysis ->
+                        analysis.setAnalyzer(ContextCompat.getMainExecutor(context)) { imageProxy ->
+                            val mediaImage = imageProxy.image
+                            if (mediaImage != null) {
+                                val image = InputImage.fromMediaImage(
+                                    mediaImage,
+                                    imageProxy.imageInfo.rotationDegrees
+                                )
+                                barcodeScanner.process(image)
+                                    .addOnSuccessListener { barcodes ->
+                                        for (barcode in barcodes) {
+                                            val code = barcode.rawValue ?: continue
+                                            if (barcode.format == Barcode.FORMAT_EAN_13 &&
+                                                code != alreadyScannedCode) {
+                                                onCodeScanned(code)
+                                                break
+                                            }
+                                        }
                                     }
-                                }
-                            }
-                            .addOnFailureListener {
-                                Log.e("BarcodeAnalyzer", "Barcode scanning failed", it)
-                            }
-                            .addOnCompleteListener {
+                                    .addOnFailureListener {
+                                        Log.e("BarcodeAnalyzer", "Barcode scanning failed", it)
+                                    }
+                                    .addOnCompleteListener {
+                                        imageProxy.close()
+                                    }
+                            } else {
                                 imageProxy.close()
                             }
-                    } else {
-                        imageProxy.close()
+                        }
                     }
-                }
-            }
 
-        val cameraSelector = CameraSelector.DEFAULT_BACK_CAMERA
-        cameraProvider.unbindAll()
-        cameraProvider.bindToLifecycle(
-            lifecycleOwner,
-            cameraSelector,
-            imageAnalysis
-        )
+                val preview = Preview.Builder().build().also {
+                    it.setSurfaceProvider(previewView.surfaceProvider)
+                }
+
+                val cameraSelector = CameraSelector.DEFAULT_BACK_CAMERA
+                cameraProvider.unbindAll()
+                cameraProvider.bindToLifecycle(
+                    lifecycleOwner,
+                    cameraSelector,
+                    preview,
+                    imageAnalysis
+                )
+            }
+        }
     }
 }
 
