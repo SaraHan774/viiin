@@ -43,6 +43,7 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.LifecycleOwner
+import com.august.viiin.model.LookupItem
 import com.google.mlkit.vision.barcode.BarcodeScannerOptions
 import com.google.mlkit.vision.barcode.BarcodeScanning
 import com.google.mlkit.vision.barcode.common.Barcode
@@ -82,7 +83,7 @@ fun BarcodeScannerScreen() {
     val lifecycleOwner = LocalLifecycleOwner.current
     val uiState = remember { mutableStateOf(ScannerUIState.Start) }
     val scannedCode = remember { mutableStateOf("") }
-    val productInfo = remember { mutableStateOf("") }
+    val productInfo = remember { mutableStateOf<LookupItem?>(null) }
 
     val vibrator = context.getSystemService(Context.VIBRATOR_SERVICE) as Vibrator
     val toneGen = remember { ToneGenerator(AudioManager.STREAM_MUSIC, 100) }
@@ -111,7 +112,7 @@ fun BarcodeScannerScreen() {
 
                     // 와인 정보 가져오기
                     CoroutineScope(Dispatchers.IO).launch {
-                        val result = WineInfoRepository().fetchWineInfo(code)
+                        val result = BarcodeInfoRepository().fetchBarcodeInfo(code)
                         withContext(Dispatchers.Main) {
                             productInfo.value = result
                             uiState.value = ScannerUIState.Result
@@ -121,7 +122,7 @@ fun BarcodeScannerScreen() {
                 onCloseCamera = {
                     uiState.value = ScannerUIState.Start
                     scannedCode.value = ""
-                    productInfo.value = ""
+                    productInfo.value = null
                 }
             )
         }
@@ -129,16 +130,16 @@ fun BarcodeScannerScreen() {
         ScannerUIState.Result -> {
             ResultScreen(
                 code = scannedCode.value,
-                info = productInfo.value,
+                item = productInfo.value,
                 onRescan = {
                     scannedCode.value = ""
-                    productInfo.value = ""
+                    productInfo.value = null
                     uiState.value = ScannerUIState.Scanning
                 },
                 onBackToHome = {
                     uiState.value = ScannerUIState.Start
                     scannedCode.value = ""
-                    productInfo.value = ""
+                    productInfo.value = null
                 }
             )
         }
@@ -263,7 +264,7 @@ fun ScanningScreen(
 @Composable
 fun ResultScreen(
     code: String,
-    info: String,
+    item: LookupItem?,
     onRescan: () -> Unit,
     onBackToHome: () -> Unit
 ) {
@@ -279,7 +280,18 @@ fun ResultScreen(
 
         Spacer(modifier = Modifier.height(16.dp))
         Text("상품 정보", fontSize = 18.sp, fontWeight = FontWeight.Medium)
-        Text(info, fontSize = 16.sp)
+        if (item != null) {
+            item.title?.let { Text("이름: $it", fontSize = 16.sp) }
+            item.brand?.let { Text("브랜드: $it", fontSize = 16.sp) }
+            item.description?.let { Text("설명: $it", fontSize = 16.sp) }
+            item.category?.let { Text("카테고리: $it", fontSize = 16.sp) }
+            item.offers?.firstOrNull()?.let { offer ->
+                offer.price?.let { Text("가격: $it", fontSize = 16.sp) }
+                offer.merchant?.let { Text("판매처: $it", fontSize = 16.sp) }
+            }
+        } else {
+            Text("상품 정보를 불러올 수 없습니다.", fontSize = 16.sp)
+        }
 
         Spacer(modifier = Modifier.height(32.dp))
         Button(onClick = onRescan) {

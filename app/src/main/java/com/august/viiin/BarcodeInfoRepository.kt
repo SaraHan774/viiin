@@ -1,5 +1,8 @@
 package com.august.viiin
 
+import com.august.viiin.model.LookupItem
+import com.august.viiin.model.LookupResponse
+import com.august.viiin.util.Keywords
 import com.google.gson.Gson
 import kotlinx.coroutines.suspendCancellableCoroutine
 import okhttp3.Call
@@ -10,17 +13,18 @@ import okhttp3.Response
 import okio.IOException
 import kotlin.coroutines.resume
 
-data class LookupResponse(
-    val items: List<LookupItem>
-)
+fun LookupItem.isWine(): Boolean {
+    val itemTokens = listOfNotNull(category, title, description, brand, model)
+        .joinToString(" ")
+        .lowercase()
+        .split(Regex("\\W+"))
+        .toSet()
 
-data class LookupItem(
-    val title: String,
-    val brand: String?
-)
+    return Keywords.dataTokens.any { it in itemTokens }
+}
 
-class WineInfoRepository {
-    suspend fun fetchWineInfo(code: String): String = suspendCancellableCoroutine { cont ->
+class BarcodeInfoRepository {
+    suspend fun fetchBarcodeInfo(code: String): LookupItem? = suspendCancellableCoroutine { cont ->
         val client = OkHttpClient()
         val request = Request.Builder()
             .url("https://api.upcitemdb.com/prod/trial/lookup?upc=$code")
@@ -28,28 +32,21 @@ class WineInfoRepository {
 
         client.newCall(request).enqueue(object : Callback {
             override fun onFailure(call: Call, e: IOException) {
-                if (cont.isActive) cont.resume("API 요청 실패: ${e.message}")
+                if (cont.isActive) cont.resume(null)
             }
 
             override fun onResponse(call: Call, response: Response) {
                 try {
                     val body = response.body?.string() ?: run {
-                        cont.resume("No response")
+                        cont.resume(null)
                         return
                     }
 
                     val lookupResponse = Gson().fromJson(body, LookupResponse::class.java)
                     val firstItem = lookupResponse.items.firstOrNull()
-
-                    if (firstItem != null) {
-                        val brand = firstItem.brand ?: ""
-                        cont.resume("${firstItem.title} ($brand)")
-                    } else {
-                        cont.resume("상품 정보를 찾을 수 없습니다.")
-                    }
-
+                    cont.resume(firstItem)
                 } catch (e: Exception) {
-                    cont.resume("응답 처리 실패: ${e.message}")
+                    cont.resume(null)
                 }
             }
         })

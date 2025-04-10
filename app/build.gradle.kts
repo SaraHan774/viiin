@@ -52,6 +52,8 @@ dependencies {
 	implementation(libs.androidx.espresso.core)
 	implementation(libs.play.services.mlkit.barcode.scanning)
 	testImplementation(libs.junit)
+	testImplementation(libs.mockwebserver)
+	testImplementation(libs.kotlinx.coroutines.test)
 	implementation(libs.okhttp)
 	implementation(libs.androidx.camera.camera2)
 	implementation(libs.androidx.camera.lifecycle)
